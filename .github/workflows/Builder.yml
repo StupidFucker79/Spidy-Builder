@@ -36,7 +36,6 @@ jobs:
             IMAGE_NAME="${IMAGE_NAME,,}"  # Convert to lowercase
             docker buildx build --platform linux/amd64 -t "$IMAGE_NAME:latest" --push "$dir"
           done
-
       - name: Pull images and update README with sizes
         run: |
           human_readable_size() {
@@ -48,15 +47,27 @@ jobs:
             fi
           }
 
+          echo "| Image | Tag | Size |" > IMAGE_SIZES.md
+          echo "|-------|-----|------|" >> IMAGE_SIZES.md
+
           for dir in repos/*; do
             IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/$(basename "$dir")"
             IMAGE_NAME="${IMAGE_NAME,,}"  # Convert to lowercase
             docker pull "$IMAGE_NAME:latest"
             SIZE_BYTES=$(docker image inspect "$IMAGE_NAME:latest" --format='{{.Size}}')
             SIZE_HUMAN=$(human_readable_size $SIZE_BYTES)
-            echo "- [$IMAGE_NAME:latest](https://ghcr.io/${{ github.repository_owner }}/$(basename "$dir" | tr '[:upper:]' '[:lower:]')) - ${SIZE_HUMAN}" >> README.md
+            echo "| [$IMAGE_NAME](https://ghcr.io/${{ github.repository_owner }}/$(basename "$dir" | tr '[:upper:]' '[:lower:]')) | latest | ${SIZE_HUMAN} |" >> IMAGE_SIZES.md
           done
 
+          # Merge into README.md
+          { head -n "$(grep -n '<!-- DOCKER_IMAGES_TABLE_START -->' README.md | cut -d: -f1)" README.md; \
+            echo "<!-- DOCKER_IMAGES_TABLE_START -->"; \
+            cat IMAGE_SIZES.md; \
+            echo "<!-- DOCKER_IMAGES_TABLE_END -->"; \
+            tail -n +"$(grep -n '<!-- DOCKER_IMAGES_TABLE_END -->' README.md | cut -d: -f1)" README.md; } > README_NEW.md
+
+          mv README_NEW.md README.md
+          
       - name: Commit README changes
         run: |
           git config user.name "GitHub Actions"
