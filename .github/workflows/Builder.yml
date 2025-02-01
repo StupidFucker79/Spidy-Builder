@@ -1,12 +1,11 @@
 name: Build and Publish Docker Images
 
-
 on:
   push:
     branches:
       - main
   workflow_dispatch:
-  
+
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
@@ -36,8 +35,25 @@ jobs:
             IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/${dir##*/}"
             IMAGE_NAME="${IMAGE_NAME,,}"  # Convert to lowercase
             docker buildx build --platform linux/amd64 -t "$IMAGE_NAME:latest" --push "$dir"
-            SIZE=$(docker image inspect "$IMAGE_NAME:latest" --format='{{.Size}}')
-            echo "- [$IMAGE_NAME:latest](https://ghcr.io/${{ github.repository_owner }}/$(basename "$dir")) - ${SIZE}" >> README.md
+          done
+
+      - name: Pull images and update README with sizes
+        run: |
+          human_readable_size() {
+            local bytes=$1
+            if [ "$bytes" -lt 1024 ]; then echo "${bytes} B"
+            elif [ "$bytes" -lt $((1024**2)) ]; then echo "$((bytes / 1024)) KB"
+            elif [ "$bytes" -lt $((1024**3)) ]; then echo "$((bytes / 1024**2)) MB"
+            else echo "$((bytes / 1024**3)) GB"
+            fi
+          }
+
+          for dir in repos/*; do
+            IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/${dir##*/}"
+            docker pull "$IMAGE_NAME:latest"
+            SIZE_BYTES=$(docker image inspect "$IMAGE_NAME:latest" --format='{{.Size}}')
+            SIZE_HUMAN=$(human_readable_size $SIZE_BYTES)
+            echo "- [$IMAGE_NAME:latest](https://ghcr.io/${{ github.repository_owner }}/$(basename "$dir")) - ${SIZE_HUMAN}" >> README.md
           done
 
       - name: Commit README changes
