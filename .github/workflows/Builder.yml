@@ -22,22 +22,30 @@ jobs:
 
       - name: Clone repositories
         run: |
-          mkdir repos
-          while read -r repo; do
-            git clone "$repo" repos/$(basename "$repo" .git)
-          done < repositories.txt
+          mkdir -p repos
+          if [ -f repositories.txt ]; then
+            while read -r repo; do
+              git clone "$repo" repos/$(basename "$repo" .git)
+            done < repositories.txt
+          else
+            echo "repositories.txt not found, skipping cloning."
+          fi
 
       - name: Build and push Docker images
         env:
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
         run: |
           for dir in repos/*; do
-            IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/$(basename "$dir")"
-            IMAGE_NAME="${IMAGE_NAME,,}"  # Convert to lowercase
-            docker buildx build --platform linux/amd64 -t "$IMAGE_NAME:latest" --push "$dir"
+            if [ -d "$dir" ]; then
+              IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/$(basename "$dir")"
+              IMAGE_NAME="${IMAGE_NAME,,}"  # Convert to lowercase
+              docker buildx build --platform linux/amd64 -t "$IMAGE_NAME:latest" --push "$dir"
+            fi
           done
+
       - name: Pull images and update README with sizes
         run: |
+          # Function to convert bytes to human-readable format
           human_readable_size() {
             local bytes=$1
             if [ "$bytes" -lt 1024 ]; then echo "${bytes} B"
@@ -47,27 +55,36 @@ jobs:
             fi
           }
 
+          # Ensure README.md exists
+          [ -f README.md ] || touch README.md
+
           echo "| Image | Tag | Size |" > IMAGE_SIZES.md
           echo "|-------|-----|------|" >> IMAGE_SIZES.md
 
           for dir in repos/*; do
-            IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/$(basename "$dir")"
-            IMAGE_NAME="${IMAGE_NAME,,}"  # Convert to lowercase
-            docker pull "$IMAGE_NAME:latest"
-            SIZE_BYTES=$(docker image inspect "$IMAGE_NAME:latest" --format='{{.Size}}')
-            SIZE_HUMAN=$(human_readable_size $SIZE_BYTES)
-            echo "| [$IMAGE_NAME](https://ghcr.io/${{ github.repository_owner }}/$(basename "$dir" | tr '[:upper:]' '[:lower:]')) | latest | ${SIZE_HUMAN} |" >> IMAGE_SIZES.md
+            if [ -d "$dir" ]; then
+              IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/$(basename "$dir")"
+              IMAGE_NAME="${IMAGE_NAME,,}"  # Convert to lowercase
+              docker pull "$IMAGE_NAME:latest"
+              SIZE_BYTES=$(docker image inspect "$IMAGE_NAME:latest" --format='{{.Size}}' 2>/dev/null || echo "0")
+              SIZE_HUMAN=$(human_readable_size $SIZE_BYTES)
+              echo "| [$IMAGE_NAME](https://ghcr.io/${{ github.repository_owner }}/$(basename "$dir" | tr '[:upper:]' '[:lower:]')) | latest | ${SIZE_HUMAN} |" >> IMAGE_SIZES.md
+            fi
           done
 
-          # Merge into README.md
-          { head -n "$(grep -n '<!-- DOCKER_IMAGES_TABLE_START -->' README.md | cut -d: -f1)" README.md; \
-            echo "<!-- DOCKER_IMAGES_TABLE_START -->"; \
-            cat IMAGE_SIZES.md; \
-            echo "<!-- DOCKER_IMAGES_TABLE_END -->"; \
-            tail -n +"$(grep -n '<!-- DOCKER_IMAGES_TABLE_END -->' README.md | cut -d: -f1)" README.md; } > README_NEW.md
+          # Find markers for Docker images table
+          START_LINE=$(grep -n '<!-- DOCKER_IMAGES_TABLE_START -->' README.md | cut -d: -f1 || echo "0")
+          END_LINE=$(grep -n '<!-- DOCKER_IMAGES_TABLE_END -->' README.md | cut -d: -f1 || echo "0")
 
-          mv README_NEW.md README.md
-          
+          if [ "$START_LINE" -ne "0" ] && [ "$END_LINE" -ne "0" ]; then
+            { head -n "$START_LINE" README.md; \
+              echo "<!-- DOCKER_IMAGES_TABLE_START -->"; \
+              cat IMAGE_SIZES.md; \
+              echo "<!-- DOCKER_IMAGES_TABLE_END -->"; \
+              tail -n +"$END_LINE" README.md; } > README_NEW.md
+            mv README_NEW.md README.md
+          fi
+
       - name: Commit README changes
         run: |
           git config user.name "GitHub Actions"
