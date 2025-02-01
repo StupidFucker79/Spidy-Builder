@@ -33,7 +33,7 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
         run: |
           for dir in repos/*; do
-            IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/$(basename "$dir")"
+            IMAGE_NAME="ghcr.io/$(basename "$dir",,)"
             docker buildx build --platform linux/amd64 -t "$IMAGE_NAME:latest" --push "$dir"
             SIZE=$(docker image inspect "$IMAGE_NAME:latest" --format='{{.Size}}')
             echo "- [$IMAGE_NAME:latest](https://ghcr.io/${{ github.repository_owner }}/$(basename "$dir")) - ${SIZE}" >> README.md
